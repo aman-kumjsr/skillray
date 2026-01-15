@@ -57,8 +57,10 @@ export default function TestPage() {
   useEffect(() => {
     if (submitted) return;
 
+    //  Do nothing until timeLeft is loaded
     if (timeLeft === null) return;
 
+    //  Auto-submit only when countdown finishes
     if (timeLeft <= 0 && attemptId) {
       submitTest(true);
       return;
@@ -95,6 +97,30 @@ export default function TestPage() {
         Time Left: {Math.floor(timeLeft / 60)}:
         {String(timeLeft % 60).padStart(2, "0")}
       </h2>
+
+      <button
+  onClick={() => {
+    const confirmSubmit = window.confirm(
+      "Are you sure you want to submit the test?"
+    );
+    if (confirmSubmit) {
+      submitTest(false);
+    }
+  }}
+  disabled={submitted}
+  style={{
+    marginBottom: "20px",
+    padding: "10px 16px",
+    backgroundColor: "#2563eb",
+    color: "white",
+    border: "none",
+    borderRadius: "6px",
+    cursor: "pointer",
+  }}
+>
+  Submit Test
+</button>
+
 
       {questions.map((q, index) => (
         <div key={q.id} style={{ marginBottom: "20px" }}>
