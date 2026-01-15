@@ -1,14 +1,16 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { apiGet, apiPost } from "../api/api";
 
 export default function TestPage() {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [attemptId, setAttemptId] = useState(null);
   const [questions, setQuestions] = useState([]);
   const [error, setError] = useState("");
-  const [timeLeft, setTimeLeft] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(null);
+  const [submitted, setSubmitted] = useState(false); // 🔒 guard
 
   // Guard against refresh / direct access
   useEffect(() => {
@@ -16,34 +18,63 @@ export default function TestPage() {
       setError("Invalid test session. Please start test again.");
       return;
     }
-
     setAttemptId(location.state.attemptId);
   }, [location.state]);
 
-  // Fetch questions & duration
+  // Fetch questions + duration
   useEffect(() => {
     if (!attemptId) return;
 
     apiGet(`/candidate/test/${attemptId}`)
       .then((data) => {
         setQuestions(data.questions);
-        setTimeLeft(data.duration * 60); // minutes → seconds
+        setTimeLeft(data.duration * 60);
       })
       .catch((err) => setError(err.message));
   }, [attemptId]);
 
-  // Simple timer ONLY (no auto-submit)
+  // Submit test (used by auto-submit)
+  const submitTest = async (auto = false) => {
+    if (submitted) return;
+    setSubmitted(true);
+
+    try {
+      const res = await apiPost("/answers/submit", { attemptId });
+
+      navigate("/result", {
+        state: {
+          result: res,
+          autoSubmitted: auto,
+        },
+      });
+    } catch (err) {
+      console.error(err);
+      setError("Failed to submit test");
+    }
+  };
+
+  // Timer + AUTO-SUBMIT
   useEffect(() => {
-    if (timeLeft <= 0) return;
+    if (submitted) return;
+
+    if (timeLeft === null) return;
+
+    if (timeLeft <= 0 && attemptId) {
+      submitTest(true);
+      return;
+    }
 
     const timer = setInterval(() => {
       setTimeLeft((t) => t - 1);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [timeLeft]);
+  }, [timeLeft, attemptId, submitted]);
 
+  // Auto-save answer
   const handleSelect = async (questionId, option) => {
+    if (submitted) return;
+
     try {
       await apiPost("/answers/save", {
         attemptId,
@@ -67,17 +98,14 @@ export default function TestPage() {
 
       {questions.map((q, index) => (
         <div key={q.id} style={{ marginBottom: "20px" }}>
-          <p>
-            <b>
-              Q{index + 1}. {q.text}
-            </b>
-          </p>
+          <p><b>Q{index + 1}. {q.text}</b></p>
 
           {["A", "B", "C", "D"].map((opt) => (
             <label key={opt} style={{ display: "block" }}>
               <input
                 type="radio"
                 name={`q-${q.id}`}
+                disabled={submitted}
                 onChange={() => handleSelect(q.id, opt)}
               />
               {q[`option${opt}`]}

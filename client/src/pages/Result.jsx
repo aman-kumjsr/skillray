@@ -4,9 +4,7 @@ export default function Result() {
   const location = useLocation();
   const { result, autoSubmitted } = location.state || {};
 
-  if (!result) {
-    return <h2>Invalid result</h2>;
-  }
+  if (!result) return <h2>Invalid result</h2>;
 
   return (
     <div>
@@ -14,7 +12,7 @@ export default function Result() {
 
       {autoSubmitted && (
         <p style={{ color: "orange" }}>
-          ⏱️ Test auto-submitted as time expired
+          ⏱️ Auto-submitted due to time expiry
         </p>
       )}
 
