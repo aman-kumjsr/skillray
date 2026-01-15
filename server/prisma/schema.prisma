@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("COMPANY")
+  createdAt DateTime @default(now())
+
+  questions Question[]
+  tests     Test[]
+}
+
+model Question {
+  id            Int      @id @default(autoincrement())
+  text          String
+  optionA       String
+  optionB       String
+  optionC       String
+  optionD       String
+  correctOption String
+  createdBy     Int
+  createdAt     DateTime @default(now())
+
+  user          User           @relation(fields: [createdBy], references: [id])
+  testQuestions TestQuestion[]
+  answers       Answer[]
+}
+
+model Test {
+  id        Int        @id @default(autoincrement())
+  title     String
+  duration  Int
+  createdBy Int
+  createdAt DateTime   @default(now())
+
+  publicToken String   @unique
+  expiresAt   DateTime?
+  accessCodeHash  String?    // 👈 OPTIONAL 6-digit access code (hashed)
+
+  user      User       @relation(fields: [createdBy], references: [id])
+  questions TestQuestion[]
+  attempts  TestAttempt[]
+}
+
+model TestQuestion {
+  id         Int      @id @default(autoincrement())
+  testId     Int
+  questionId Int
+
+  test     Test     @relation(fields: [testId], references: [id])
+  question Question @relation(fields: [questionId], references: [id])
+}
+
+model TestAttempt {
+  id             Int      @id @default(autoincrement())
+  testId         Int
+  candidateName  String
+  candidateEmail String
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  test Test @relation(fields: [testId], references: [id])
+  answers  Answer[]
+  @@unique([testId, candidateEmail])
+}
+
+model Answer {
+  id          Int      @id @default(autoincrement())
+  attemptId   Int
+  questionId  Int
+  selectedOption String
+
+  attempt  TestAttempt @relation(fields: [attemptId], references: [id])
+  question Question    @relation(fields: [questionId], references: [id])
+  @@unique([attemptId, questionId])
+}
