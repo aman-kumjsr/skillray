@@ -11,15 +11,28 @@ export default function TestPage() {
   const [error, setError] = useState("");
   const [timeLeft, setTimeLeft] = useState(null);
   const [submitted, setSubmitted] = useState(false); // 🔒 guard
+  const [answers, setAnswers] = useState({});
 
   // Guard against refresh / direct access
   useEffect(() => {
-    if (!location.state || !location.state.attemptId) {
-      setError("Invalid test session. Please start test again.");
+    // 1️⃣ Try from navigation state
+    if (location.state?.attemptId) {
+      setAttemptId(location.state.attemptId);
+      localStorage.setItem("attemptId", location.state.attemptId);
       return;
     }
-    setAttemptId(location.state.attemptId);
+
+    // 2️⃣ Try from localStorage (refresh case)
+    const savedAttemptId = localStorage.getItem("attemptId");
+    if (savedAttemptId) {
+      setAttemptId(Number(savedAttemptId));
+      return;
+    }
+
+    // 3️⃣ No session found
+    setError("Invalid test session. Please start test again.");
   }, [location.state]);
+
 
   // Fetch questions + duration
   useEffect(() => {
@@ -28,7 +41,23 @@ export default function TestPage() {
     apiGet(`/candidate/test/${attemptId}`)
       .then((data) => {
         setQuestions(data.questions);
-        setTimeLeft(data.duration * 60);
+
+        const startedAt = new Date(data.startedAt).getTime();
+        const now = Date.now();
+
+        const totalSeconds = data.duration * 60;
+        const elapsedSeconds = Math.floor((now - startedAt) / 1000);
+        const remaining = totalSeconds - elapsedSeconds;
+
+        setTimeLeft(remaining > 0 ? remaining : 0);
+
+        const savedAnswers = {};
+        data.answers.forEach(a => {
+          savedAnswers[a.questionId] = a.selectedOption;
+        });
+        setAnswers(savedAnswers);
+
+
       })
       .catch((err) => setError(err.message));
   }, [attemptId]);
@@ -40,6 +69,8 @@ export default function TestPage() {
 
     try {
       const res = await apiPost("/answers/submit", { attemptId });
+
+      localStorage.removeItem("attemptId"); // ✅ clear session
 
       navigate("/result", {
         state: {
@@ -99,27 +130,27 @@ export default function TestPage() {
       </h2>
 
       <button
-  onClick={() => {
-    const confirmSubmit = window.confirm(
-      "Are you sure you want to submit the test?"
-    );
-    if (confirmSubmit) {
-      submitTest(false);
-    }
-  }}
-  disabled={submitted}
-  style={{
-    marginBottom: "20px",
-    padding: "10px 16px",
-    backgroundColor: "#2563eb",
-    color: "white",
-    border: "none",
-    borderRadius: "6px",
-    cursor: "pointer",
-  }}
->
-  Submit Test
-</button>
+        onClick={() => {
+          const confirmSubmit = window.confirm(
+            "Are you sure you want to submit the test?"
+          );
+          if (confirmSubmit) {
+            submitTest(false);
+          }
+        }}
+        disabled={submitted}
+        style={{
+          marginBottom: "20px",
+          padding: "10px 16px",
+          backgroundColor: "#2563eb",
+          color: "white",
+          border: "none",
+          borderRadius: "6px",
+          cursor: "pointer",
+        }}
+      >
+        Submit Test
+      </button>
 
 
       {questions.map((q, index) => (
@@ -130,10 +161,13 @@ export default function TestPage() {
             <label key={opt} style={{ display: "block" }}>
               <input
                 type="radio"
-                name={`q-${q.id}`}
-                disabled={submitted}
-                onChange={() => handleSelect(q.id, opt)}
+                checked={answers[q.id] === opt}
+                onChange={() => {
+                  setAnswers(prev => ({ ...prev, [q.id]: opt }));
+                  handleSelect(q.id, opt);
+                }}
               />
+
               {q[`option${opt}`]}
             </label>
           ))}

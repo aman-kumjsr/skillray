@@ -86,6 +86,12 @@ const getCandidateTest = async (req, res) => {
     const attempt = await prisma.testAttempt.findUnique({
       where: { id: attemptId },
       include: {
+        answers: {
+          select: {
+            questionId: true,
+            selectedOption: true,
+          },
+        },
         test: {
           include: {
             questions: {
@@ -113,7 +119,9 @@ const getCandidateTest = async (req, res) => {
 
     res.json({
       duration: attempt.test.duration,
+      startedAt: attempt.startedAt,
       questions: attempt.test.questions.map((q) => q.question),
+      answers: attempt.answers,
     });
   } catch (error) {
     console.error(error);

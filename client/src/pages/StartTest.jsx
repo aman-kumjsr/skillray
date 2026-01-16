@@ -38,6 +38,8 @@ export default function StartTest() {
 
       const res = await apiPost("/candidate/start", payload);
 
+      localStorage.setItem("attemptId", res.attemptId);
+
       navigate("/test-run", {
         state: { attemptId: res.attemptId },
       });
