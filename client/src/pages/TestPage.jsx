@@ -42,6 +42,18 @@ export default function TestPage() {
       .then((data) => {
         setQuestions(data.questions);
 
+        if (data.submittedAt) {
+          // Test already submitted → go to result
+          navigate("/result", {
+            replace: true,
+            state: {
+              result: { message: "Test already submitted" },
+              autoSubmitted: false,
+            },
+          });
+          return;
+        }
+        // Timer restore logic
         const startedAt = new Date(data.startedAt).getTime();
         const now = Date.now();
 
@@ -56,7 +68,6 @@ export default function TestPage() {
           savedAnswers[a.questionId] = a.selectedOption;
         });
         setAnswers(savedAnswers);
-
 
       })
       .catch((err) => setError(err.message));
@@ -73,6 +84,7 @@ export default function TestPage() {
       localStorage.removeItem("attemptId"); // ✅ clear session
 
       navigate("/result", {
+        replace: true, // 🔒 removes test page from history - helps to lock nav after submission of test
         state: {
           result: res,
           autoSubmitted: auto,

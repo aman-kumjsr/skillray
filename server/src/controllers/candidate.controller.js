@@ -120,6 +120,7 @@ const getCandidateTest = async (req, res) => {
     res.json({
       duration: attempt.test.duration,
       startedAt: attempt.startedAt,
+      submittedAt: attempt.submittedAt,
       questions: attempt.test.questions.map((q) => q.question),
       answers: attempt.answers,
     });
