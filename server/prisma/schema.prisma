@@ -49,6 +49,8 @@ model Test {
   user      User       @relation(fields: [createdBy], references: [id])
   questions TestQuestion[]
   attempts  TestAttempt[]
+
+  autoSubmitOnGraceExpire Boolean   @default(false)
 }
 
 model TestQuestion {

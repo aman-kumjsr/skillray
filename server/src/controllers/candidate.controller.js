@@ -121,6 +121,7 @@ const getCandidateTest = async (req, res) => {
       duration: attempt.test.duration,
       startedAt: attempt.startedAt,
       submittedAt: attempt.submittedAt,
+      autoSubmitOnGraceExpire: attempt.test.autoSubmitOnGraceExpire,
       questions: attempt.test.questions.map((q) => q.question),
       answers: attempt.answers,
     });

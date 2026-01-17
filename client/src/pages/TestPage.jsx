@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiGet, apiPost } from "../api/api";
 
 export default function TestPage() {
@@ -10,51 +10,48 @@ export default function TestPage() {
   const [questions, setQuestions] = useState([]);
   const [error, setError] = useState("");
   const [timeLeft, setTimeLeft] = useState(null);
-  const [submitted, setSubmitted] = useState(false); // 🔒 guard
+  const [submitted, setSubmitted] = useState(false);
   const [answers, setAnswers] = useState({});
   const [violations, setViolations] = useState(0);
   const [showViolationModal, setShowViolationModal] = useState(false);
-  const [graceTime, setGraceTime] = useState(30); // seconds
+  const [graceTime, setGraceTime] = useState(30);
+  const [autoSubmitOnGraceExpire, setAutoSubmitOnGraceExpire] = useState(false);
+
   const MAX_VIOLATIONS = 3;
 
+  // 🔐 Proctoring refs
+  const hasEnteredFullscreen = useRef(false);
+  const wasFullscreen = useRef(false);
 
-  // Enter full screen mode when test starts
+  /* -------------------------------------------------- */
+  /*  SESSION GUARD                                     */
+  /* -------------------------------------------------- */
+
   useEffect(() => {
-  if (!questions.length || showViolationModal || submitted) return;
-  if (document.fullscreenElement) return;
-
-  document.documentElement.requestFullscreen().catch(() => {});
-}, [questions, showViolationModal, submitted]);
-
-
-  // Guard against refresh / direct access
-  useEffect(() => {
-    // 1️⃣ Try from navigation state
     if (location.state?.attemptId) {
       setAttemptId(location.state.attemptId);
       localStorage.setItem("attemptId", location.state.attemptId);
       return;
     }
 
-    // 2️⃣ Try from localStorage (refresh case)
-    const savedAttemptId = localStorage.getItem("attemptId");
-    if (savedAttemptId) {
-      setAttemptId(Number(savedAttemptId));
+    const saved = localStorage.getItem("attemptId");
+    if (saved) {
+      setAttemptId(Number(saved));
       return;
     }
 
-    // 3️⃣ No session found
     setError("Invalid test session. Please start test again.");
   }, [location.state]);
 
+  /* -------------------------------------------------- */
+  /*  FETCH TEST DATA                                   */
+  /* -------------------------------------------------- */
 
-  // Fetch questions + duration
   useEffect(() => {
     if (!attemptId) return;
 
     apiGet(`/candidate/test/${attemptId}`)
       .then((data) => {
-
         if (data.submittedAt) {
           navigate("/result", {
             replace: true,
@@ -66,58 +63,136 @@ export default function TestPage() {
           return;
         }
 
+        setAutoSubmitOnGraceExpire(data.autoSubmitOnGraceExpire);
         setQuestions(data.questions);
 
         const startedAt = new Date(data.startedAt).getTime();
-        const now = Date.now();
-
         const totalSeconds = data.duration * 60;
-        const elapsedSeconds = Math.floor((now - startedAt) / 1000);
-        const remaining = totalSeconds - elapsedSeconds;
-
-        setTimeLeft(remaining > 0 ? remaining : 0);
+        const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        setTimeLeft(Math.max(totalSeconds - elapsed, 0));
 
         const savedAnswers = {};
-        data.answers.forEach(a => {
+        data.answers.forEach((a) => {
           savedAnswers[a.questionId] = a.selectedOption;
         });
         setAnswers(savedAnswers);
       })
       .catch((err) => setError(err.message));
+  }, [attemptId, navigate]);
 
-  }, [attemptId]);
+  /* -------------------------------------------------- */
+  /*  ENTER FULLSCREEN ON START                          */
+  /* -------------------------------------------------- */
 
-  // Submit test (used by auto-submit)
-  const submitTest = async (auto = false) => {
-    if (submitted) return;
-    setSubmitted(true);
+  useEffect(() => {
+    if (!questions.length || submitted || showViolationModal) return;
+    if (document.fullscreenElement) return;
 
-    try {
-      const res = await apiPost("/answers/submit", { attemptId });
+    document.documentElement.requestFullscreen().catch(() => { });
+  }, [questions.length, submitted, showViolationModal]);
 
-      localStorage.removeItem("attemptId"); // ✅ clear session
+  /* -------------------------------------------------- */
+  /*  FULLSCREEN CHANGE HANDLER (CORE FIX)               */
+  /* -------------------------------------------------- */
 
-      navigate("/result", {
-        replace: true, // 🔒 removes test page from history - helps to lock nav after submission of test
-        state: {
-          result: res,
-          autoSubmitted: auto,
-        },
-      });
-    } catch (err) {
-      console.error(err);
-      setError("Failed to submit test");
+  const handleFullscreenChange = () => {
+    const isFullscreenNow = !!document.fullscreenElement;
+
+    // Ignore before test loads
+    if (!questions.length) return;
+
+    // First time fullscreen entry → mark & ignore
+    if (!hasEnteredFullscreen.current && isFullscreenNow) {
+      hasEnteredFullscreen.current = true;
+      wasFullscreen.current = true;
+      return;
     }
+
+    // Ignore noise
+    if (!hasEnteredFullscreen.current || submitted || showViolationModal) return;
+
+    // REAL exit from fullscreen
+    if (wasFullscreen.current && !isFullscreenNow) {
+      const next = violations + 1;
+      setViolations(next);
+
+      if (next > MAX_VIOLATIONS) {
+        submitTest(true);
+        return;
+      }
+
+      setShowViolationModal(true);
+      setGraceTime(30);
+    }
+
+    wasFullscreen.current = isFullscreenNow;
   };
 
-  // Timer + AUTO-SUBMIT
   useEffect(() => {
-    if (submitted) return;
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [questions.length, violations, submitted, showViolationModal]);
 
-    //  Do nothing until timeLeft is loaded
-    if (timeLeft === null) return;
+  /* -------------------------------------------------- */
+  /*  TAB SWITCH / VISIBILITY                            */
+  /* -------------------------------------------------- */
 
-    //  Auto-submit only when countdown finishes
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === "hidden" &&
+        hasEnteredFullscreen.current &&
+        !submitted &&
+        !showViolationModal
+      ) {
+        const next = violations + 1;
+        setViolations(next);
+
+        if (next > MAX_VIOLATIONS) {
+          submitTest(true);
+          return;
+        }
+
+        setShowViolationModal(true);
+        setGraceTime(30);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [violations, submitted, showViolationModal]);
+
+  /* -------------------------------------------------- */
+  /*  GRACE TIMER                                       */
+  /* -------------------------------------------------- */
+
+  useEffect(() => {
+    if (!showViolationModal) return;
+
+    if (graceTime <= 0) {
+      setShowViolationModal(false);
+      if (autoSubmitOnGraceExpire) submitTest(true);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setGraceTime((t) => t - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showViolationModal, graceTime, autoSubmitOnGraceExpire]);
+
+  /* -------------------------------------------------- */
+  /*  TIMER + AUTO SUBMIT                                */
+  /* -------------------------------------------------- */
+
+  useEffect(() => {
+    if (submitted || timeLeft === null) return;
+
     if (timeLeft <= 0 && attemptId) {
       submitTest(true);
       return;
@@ -130,9 +205,14 @@ export default function TestPage() {
     return () => clearInterval(timer);
   }, [timeLeft, attemptId, submitted]);
 
-  // Auto-save answer
+  /* -------------------------------------------------- */
+  /*  ANSWER SAVE                                       */
+  /* -------------------------------------------------- */
+
   const handleSelect = async (questionId, option) => {
     if (submitted) return;
+
+    setAnswers((prev) => ({ ...prev, [questionId]: option }));
 
     try {
       await apiPost("/answers/save", {
@@ -145,38 +225,30 @@ export default function TestPage() {
     }
   };
 
-  const handleFullscreenExit = () => {
-    if (!document.fullscreenElement && !submitted && !showViolationModal) {
-      const next = violations + 1;
-      setViolations(next);
+  /* -------------------------------------------------- */
+  /*  SUBMIT                                            */
+  /* -------------------------------------------------- */
 
-      if (next > MAX_VIOLATIONS) {
-        submitTest(true);
-        return;
-      }
+  const submitTest = async (auto = false) => {
+    if (submitted) return;
+    setSubmitted(true);
 
-      setShowViolationModal(true);
-      setGraceTime(30);
+    try {
+      const res = await apiPost("/answers/submit", { attemptId });
+      localStorage.removeItem("attemptId");
+
+      navigate("/result", {
+        replace: true,
+        state: { result: res, autoSubmitted: auto },
+      });
+    } catch {
+      setError("Failed to submit test");
     }
   };
 
-
-
-  useEffect(() => {
-    if (!showViolationModal) return;
-
-    if (graceTime <= 0) {
-      setShowViolationModal(false);
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setGraceTime(t => t - 1);
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [showViolationModal, graceTime]);
-
+  /* -------------------------------------------------- */
+  /*  RE-ENTER FULLSCREEN                               */
+  /* ---------------------------------------------------*/
 
   const reEnterFullscreen = () => {
     document.documentElement.requestFullscreen().then(() => {
@@ -184,16 +256,9 @@ export default function TestPage() {
     });
   };
 
-  useEffect(() => {
-    document.addEventListener("fullscreenchange", handleFullscreenExit);
-
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenExit);
-    };
-  }, [violations, submitted, showViolationModal]);
-
-
-
+  /* -------------------------------------------------- */
+  /*  UI                                                */
+  /* -------------------------------------------------- */
 
   if (error) return <h2 style={{ color: "red" }}>{error}</h2>;
   if (!questions.length) return <h2>Loading test...</h2>;
@@ -207,23 +272,11 @@ export default function TestPage() {
 
       <button
         onClick={() => {
-          const confirmSubmit = window.confirm(
-            "Are you sure you want to submit the test?"
-          );
-          if (confirmSubmit) {
+          if (window.confirm("Are you sure you want to submit the test?")) {
             submitTest(false);
           }
         }}
         disabled={submitted}
-        style={{
-          marginBottom: "20px",
-          padding: "10px 16px",
-          backgroundColor: "#2563eb",
-          color: "white",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer",
-        }}
       >
         Submit Test
       </button>
@@ -232,11 +285,8 @@ export default function TestPage() {
         <div
           style={{
             position: "fixed",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-            backgroundColor: "rgba(0,0,0,0.85)",
+            inset: 0,
+            background: "rgba(0,0,0,0.85)",
             color: "white",
             display: "flex",
             flexDirection: "column",
@@ -246,44 +296,30 @@ export default function TestPage() {
           }}
         >
           <h2>⚠️ Fullscreen Required</h2>
-
           <p>
             Violations: <b>{violations}</b> / {MAX_VIOLATIONS}
           </p>
-
           <p>
-            Please return to fullscreen within <b>{graceTime}s</b>
+            Return to fullscreen within <b>{graceTime}s</b>
           </p>
-
-          <button
-            onClick={reEnterFullscreen}
-            style={{
-              padding: "10px 16px",
-              marginTop: "20px",
-              fontSize: "16px",
-              cursor: "pointer",
-            }}
-          >
-            Return to Fullscreen
-          </button>
+          <button onClick={reEnterFullscreen}>Return to Fullscreen</button>
         </div>
       )}
 
-      {questions.map((q, index) => (
-        <div key={q.id} style={{ marginBottom: "20px" }}>
-          <p><b>Q{index + 1}. {q.text}</b></p>
-
+      {questions.map((q, i) => (
+        <div key={q.id}>
+          <p>
+            <b>
+              Q{i + 1}. {q.text}
+            </b>
+          </p>
           {["A", "B", "C", "D"].map((opt) => (
             <label key={opt} style={{ display: "block" }}>
               <input
                 type="radio"
                 checked={answers[q.id] === opt}
-                onChange={() => {
-                  setAnswers(prev => ({ ...prev, [q.id]: opt }));
-                  handleSelect(q.id, opt);
-                }}
+                onChange={() => handleSelect(q.id, opt)}
               />
-
               {q[`option${opt}`]}
             </label>
           ))}
