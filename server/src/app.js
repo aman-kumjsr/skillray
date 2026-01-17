@@ -12,6 +12,7 @@ const candidateRoutes = require("./routes/candidate.routes");
 const answerRoutes = require("./routes/answer.routes");
 const resultRoutes = require("./routes/result.routes");
 const saveAnswerRoutes = require("./routes/saveAnswer.routes");
+const violationRoutes = require("./routes/violation.routes");
 
 
 const app = express();
@@ -24,7 +25,7 @@ app.use(
 
 app.use(express.json());
 
-app.get("/health", (req, res) => {
+app.get("/health", (_req, res) => {
   res.json({ status: "Skillray backend running" });
 });
 
@@ -56,6 +57,7 @@ app.use("/api/results", resultRoutes);
 
 app.use("/api/answers", saveAnswerRoutes);
 
+app.use("/api/violations", violationRoutes);
 
 app.listen(5000, () => {
   console.log("Server running on http://localhost:5000");

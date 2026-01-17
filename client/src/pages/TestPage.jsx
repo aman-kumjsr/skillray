@@ -70,6 +70,18 @@ export default function TestPage() {
       .catch((err) => setError(err.message));
   }, [attemptId, navigate]);
 
+  const logViolation = async (violation) => {
+    try {
+      await apiPost("/violations/log", {
+        attemptId,
+        ...violation,
+      });
+    } catch (err) {
+      console.error("Violation log failed", err);
+    }
+  };
+
+
   /* ---------------- SUBMIT ---------------- */
 
   const submitTest = async (auto = false) => {
@@ -103,6 +115,8 @@ export default function TestPage() {
     enabled: questions.length > 0 && !submitted,
     maxViolations: 3,
     graceSeconds: 30,
+    autoSubmitOnGraceExpire: false,
+    onViolation: logViolation,
     onAutoSubmit: () => submitTest(true),
   });
 

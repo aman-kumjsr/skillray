@@ -72,6 +72,7 @@ model TestAttempt {
 
   test Test @relation(fields: [testId], references: [id])
   answers  Answer[]
+  violations  Violation[]
   @@unique([testId, candidateEmail])
 }
 
@@ -85,3 +86,15 @@ model Answer {
   question Question    @relation(fields: [questionId], references: [id])
   @@unique([attemptId, questionId])
 }
+
+model Violation {
+  violationId Int      @id @default(autoincrement())
+  attemptId   Int
+  type        String
+  count       Int
+  timestamp   DateTime
+
+  attempt     TestAttempt @relation(fields: [attemptId], references: [id])
+
+}
+

@@ -4,7 +4,8 @@ export default function useProctoring({
     enabled,
     maxViolations = 3,
     graceSeconds = 30,
-    autoSubmitOnGraceExpire = false,
+    autoSubmitOnGraceExpire = false,  // set 'true' to enable autoSubmitOnGraceExpire
+    onViolation,
     onAutoSubmit,
 }) {
     /* ---------------- STATE ---------------- */
@@ -52,6 +53,12 @@ export default function useProctoring({
         if (wasFullscreen.current && !isFullscreenNow) {
             const next = violations + 1;
             setViolations(next);
+
+            onViolation?.({
+                type: "FULLSCREEN_EXIT",
+                count: next,
+                timestamp: new Date().toISOString(),
+            });
 
             if (next > maxViolations) {
                 onAutoSubmit?.();
