@@ -12,6 +12,20 @@ export default function TestPage() {
   const [timeLeft, setTimeLeft] = useState(null);
   const [submitted, setSubmitted] = useState(false); // 🔒 guard
   const [answers, setAnswers] = useState({});
+  const [violations, setViolations] = useState(0);
+  const [showViolationModal, setShowViolationModal] = useState(false);
+  const [graceTime, setGraceTime] = useState(30); // seconds
+  const MAX_VIOLATIONS = 3;
+
+
+  // Enter full screen mode when test starts
+  useEffect(() => {
+  if (!questions.length || showViolationModal || submitted) return;
+  if (document.fullscreenElement) return;
+
+  document.documentElement.requestFullscreen().catch(() => {});
+}, [questions, showViolationModal, submitted]);
+
 
   // Guard against refresh / direct access
   useEffect(() => {
@@ -40,10 +54,8 @@ export default function TestPage() {
 
     apiGet(`/candidate/test/${attemptId}`)
       .then((data) => {
-        setQuestions(data.questions);
 
         if (data.submittedAt) {
-          // Test already submitted → go to result
           navigate("/result", {
             replace: true,
             state: {
@@ -53,7 +65,9 @@ export default function TestPage() {
           });
           return;
         }
-        // Timer restore logic
+
+        setQuestions(data.questions);
+
         const startedAt = new Date(data.startedAt).getTime();
         const now = Date.now();
 
@@ -68,9 +82,9 @@ export default function TestPage() {
           savedAnswers[a.questionId] = a.selectedOption;
         });
         setAnswers(savedAnswers);
-
       })
       .catch((err) => setError(err.message));
+
   }, [attemptId]);
 
   // Submit test (used by auto-submit)
@@ -131,6 +145,56 @@ export default function TestPage() {
     }
   };
 
+  const handleFullscreenExit = () => {
+    if (!document.fullscreenElement && !submitted && !showViolationModal) {
+      const next = violations + 1;
+      setViolations(next);
+
+      if (next > MAX_VIOLATIONS) {
+        submitTest(true);
+        return;
+      }
+
+      setShowViolationModal(true);
+      setGraceTime(30);
+    }
+  };
+
+
+
+  useEffect(() => {
+    if (!showViolationModal) return;
+
+    if (graceTime <= 0) {
+      setShowViolationModal(false);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setGraceTime(t => t - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showViolationModal, graceTime]);
+
+
+  const reEnterFullscreen = () => {
+    document.documentElement.requestFullscreen().then(() => {
+      setShowViolationModal(false);
+    });
+  };
+
+  useEffect(() => {
+    document.addEventListener("fullscreenchange", handleFullscreenExit);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenExit);
+    };
+  }, [violations, submitted, showViolationModal]);
+
+
+
+
   if (error) return <h2 style={{ color: "red" }}>{error}</h2>;
   if (!questions.length) return <h2>Loading test...</h2>;
 
@@ -164,6 +228,46 @@ export default function TestPage() {
         Submit Test
       </button>
 
+      {showViolationModal && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            backgroundColor: "rgba(0,0,0,0.85)",
+            color: "white",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            alignItems: "center",
+            zIndex: 9999,
+          }}
+        >
+          <h2>⚠️ Fullscreen Required</h2>
+
+          <p>
+            Violations: <b>{violations}</b> / {MAX_VIOLATIONS}
+          </p>
+
+          <p>
+            Please return to fullscreen within <b>{graceTime}s</b>
+          </p>
+
+          <button
+            onClick={reEnterFullscreen}
+            style={{
+              padding: "10px 16px",
+              marginTop: "20px",
+              fontSize: "16px",
+              cursor: "pointer",
+            }}
+          >
+            Return to Fullscreen
+          </button>
+        </div>
+      )}
 
       {questions.map((q, index) => (
         <div key={q.id} style={{ marginBottom: "20px" }}>
