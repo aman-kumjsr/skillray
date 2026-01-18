@@ -1,150 +1,196 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function useProctoring({
-    enabled,
-    maxViolations = 3,
-    graceSeconds = 30,
-    autoSubmitOnGraceExpire = false,  // set 'true' to enable autoSubmitOnGraceExpire
-    onViolation,
-    onAutoSubmit,
+  enabled,
+  maxViolations = 3,
+  graceSeconds = 30,
+  autoSubmitOnGraceExpire = false,
+  onViolation,
+  onAutoSubmit,
 }) {
-    /* ---------------- STATE ---------------- */
+  /* ---------------- STATE ---------------- */
 
-    const [violations, setViolations] = useState(0);
-    const [showViolationModal, setShowViolationModal] = useState(false);
-    const [graceTime, setGraceTime] = useState(graceSeconds);
+  const [violations, setViolations] = useState(0);
+  const [showViolationModal, setShowViolationModal] = useState(false);
+  const [graceTime, setGraceTime] = useState(graceSeconds);
 
-    /* ---------------- REFS ---------------- */
+  /* ---------------- REFS ---------------- */
 
-    // Has fullscreen ever been entered successfully?
-    const hasEnteredFullscreen = useRef(false);
+  // Prevent duplicate violations during same grace window
+  const violationLocked = useRef(false);
 
-    // Was fullscreen active BEFORE the last event?
-    const wasFullscreen = useRef(false);
+  // Has fullscreen ever been entered successfully?
+  const hasEnteredFullscreen = useRef(false);
 
-    /* ---------------- ENTER FULLSCREEN ---------------- */
+  // Was fullscreen active before the last event?
+  const wasFullscreen = useRef(false);
 
-    useEffect(() => {
-        if (!enabled) return;
-        if (showViolationModal) return;
-        if (document.fullscreenElement) return;
+  // Used to ignore fullscreen exits triggered by our own actions
+  const intentionalExit = useRef(false);
 
-        document.documentElement.requestFullscreen().catch(() => { });
-    }, [enabled, showViolationModal]);
+  /* ---------------- ENTER FULLSCREEN ---------------- */
 
-    /* ---------------- FULLSCREEN CHANGE ---------------- */
+  useEffect(() => {
+    if (!enabled) return;
+    if (showViolationModal || violationLocked.current) return;
+    if (document.fullscreenElement) return;
 
-    const handleFullscreenChange = () => {
-        if (!enabled) return;
+    document.documentElement.requestFullscreen().catch(() => {});
+  }, [enabled, showViolationModal]);
 
-        const isFullscreenNow = !!document.fullscreenElement;
+  /* ---------------- FULLSCREEN CHANGE ---------------- */
 
-        // First successful fullscreen entry → mark & ignore
-        if (!hasEnteredFullscreen.current && isFullscreenNow) {
-            hasEnteredFullscreen.current = true;
-            wasFullscreen.current = true;
-            return;
-        }
+  const handleFullscreenChange = () => {
+    if (!enabled) return;
 
-        // Ignore noise before test really starts
-        if (!hasEnteredFullscreen.current || showViolationModal) return;
+    const isFullscreenNow = !!document.fullscreenElement;
 
-        // REAL fullscreen exit → violation
-        if (wasFullscreen.current && !isFullscreenNow) {
-            const next = violations + 1;
-            setViolations(next);
+    // First successful fullscreen entry → mark & ignore
+    if (!hasEnteredFullscreen.current && isFullscreenNow) {
+      hasEnteredFullscreen.current = true;
+      wasFullscreen.current = true;
+      return;
+    }
 
-            onViolation?.({
-                type: "FULLSCREEN_EXIT",
-                count: next,
-                timestamp: new Date().toISOString(),
-            });
+    // REAL fullscreen exit → violation
+    if (
+      wasFullscreen.current &&
+      !isFullscreenNow &&
+      !intentionalExit.current
+    ) {
+      if (violationLocked.current) return;
 
-            if (next > maxViolations) {
-                onAutoSubmit?.();
-                return;
-            }
+      violationLocked.current = true;
 
-            setShowViolationModal(true);
-            setGraceTime(graceSeconds);
-        }
+      const next = violations + 1;
+      setViolations(next);
 
-        wasFullscreen.current = isFullscreenNow;
+      onViolation?.({
+        type: "FULLSCREEN_EXIT",
+        count: next,
+        timestamp: new Date().toISOString(),
+      });
+
+      setShowViolationModal(true);
+      setGraceTime(graceSeconds);
+    }
+
+    wasFullscreen.current = isFullscreenNow;
+  };
+
+  useEffect(() => {
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
+  }, [violations, enabled, showViolationModal]);
 
-    useEffect(() => {
-        document.addEventListener("fullscreenchange", handleFullscreenChange);
-        return () => {
-            document.removeEventListener("fullscreenchange", handleFullscreenChange);
-        };
-    }, [violations, enabled, showViolationModal]);
+  /* ---------------- TAB SWITCH ---------------- */
 
-    /* ---------------- TAB SWITCH / VISIBILITY ---------------- */
+  useEffect(() => {
+    if (!enabled) return;
 
-    useEffect(() => {
-        if (!enabled) return;
+    const handleVisibilityChange = () => {
+      if (
+        document.visibilityState === "hidden" &&
+        hasEnteredFullscreen.current &&
+        !showViolationModal
+      ) {
+        if (violationLocked.current) return;
 
-        const handleVisibilityChange = () => {
-            if (
-                document.visibilityState === "hidden" &&
-                hasEnteredFullscreen.current &&
-                !showViolationModal
-            ) {
-                const next = violations + 1;
-                setViolations(next);
+        violationLocked.current = true;
 
-                if (next > maxViolations) {
-                    onAutoSubmit?.();
-                    return;
-                }
+        const next = violations + 1;
+        setViolations(next);
 
-                setShowViolationModal(true);
-                setGraceTime(graceSeconds);
-            }
-        };
-
-        document.addEventListener("visibilitychange", handleVisibilityChange);
-        return () => {
-            document.removeEventListener("visibilitychange", handleVisibilityChange);
-        };
-    }, [violations, enabled, showViolationModal]);
-
-    /* ---------------- GRACE TIMER ---------------- */
-
-    useEffect(() => {
-        if (!showViolationModal) return;
-
-        if (graceTime <= 0) {
-            setShowViolationModal(false);
-
-            if (autoSubmitOnGraceExpire) {
-                onAutoSubmit?.();
-            }
-
-            return;
-        }
-
-        const timer = setInterval(() => {
-            setGraceTime((t) => t - 1);
-        }, 1000);
-
-        return () => clearInterval(timer);
-    }, [showViolationModal, graceTime, onAutoSubmit]);
-
-    /* ---------------- RE-ENTER FULLSCREEN ---------------- */
-
-    const reEnterFullscreen = () => {
-        document.documentElement.requestFullscreen().then(() => {
-            setShowViolationModal(false);
+        onViolation?.({
+          type: "TAB_SWITCH",
+          count: next,
+          timestamp: new Date().toISOString(),
         });
+
+        setShowViolationModal(true);
+        setGraceTime(graceSeconds);
+      }
     };
 
-    /* ---------------- PUBLIC API ---------------- */
-
-    return {
-        violations,
-        showViolationModal,
-        graceTime,
-        reEnterFullscreen,
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
+  }, [violations, enabled, showViolationModal]);
+
+  /* ---------------- WINDOW MINIMIZE / APP SWITCH ---------------- */
+
+  const handleWindowBlur = () => {
+    if (!hasEnteredFullscreen.current || showViolationModal) return;
+
+    if (violationLocked.current) return;
+
+    violationLocked.current = true;
+
+    const next = violations + 1;
+    setViolations(next);
+
+    onViolation?.({
+      type: "WINDOW_MINIMIZE",
+      count: next,
+      timestamp: new Date().toISOString(),
+    });
+
+    setShowViolationModal(true);
+    setGraceTime(graceSeconds);
+  };
+
+  useEffect(() => {
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [violations, showViolationModal]);
+
+  /* ---------------- GRACE TIMER ---------------- */
+
+  useEffect(() => {
+    if (!showViolationModal) return;
+
+    if (graceTime <= 0) {
+      setShowViolationModal(false);
+
+      // Unlock future violations
+      violationLocked.current = false;
+
+      if (autoSubmitOnGraceExpire) {
+        onAutoSubmit?.();
+      }
+
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setGraceTime((t) => t - 1);
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [showViolationModal, graceTime, autoSubmitOnGraceExpire]);
+
+  /* ---------------- RE-ENTER FULLSCREEN ---------------- */
+
+  const reEnterFullscreen = () => {
+    intentionalExit.current = true;
+
+    document.documentElement.requestFullscreen().then(() => {
+      setShowViolationModal(false);
+      intentionalExit.current = false;
+    });
+  };
+
+  /* ---------------- PUBLIC API ---------------- */
+
+  return {
+    violations,
+    showViolationModal,
+    graceTime,
+    reEnterFullscreen,
+  };
 }
