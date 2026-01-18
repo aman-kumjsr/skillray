@@ -13,6 +13,7 @@ const answerRoutes = require("./routes/answer.routes");
 const resultRoutes = require("./routes/result.routes");
 const saveAnswerRoutes = require("./routes/saveAnswer.routes");
 const violationRoutes = require("./routes/violation.routes");
+const attemptRoutes = require("./routes/attempt.routes");
 
 
 const app = express();
@@ -58,6 +59,8 @@ app.use("/api/results", resultRoutes);
 app.use("/api/answers", saveAnswerRoutes);
 
 app.use("/api/violations", violationRoutes);
+
+app.use("/api/attempts", attemptRoutes);
 
 app.listen(5000, () => {
   console.log("Server running on http://localhost:5000");

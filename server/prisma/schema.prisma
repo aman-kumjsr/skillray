@@ -85,6 +85,7 @@ model Answer {
   attempt  TestAttempt @relation(fields: [attemptId], references: [id])
   question Question    @relation(fields: [questionId], references: [id])
   @@unique([attemptId, questionId])
+
 }
 
 model Violation {
@@ -95,6 +96,6 @@ model Violation {
   timestamp   DateTime
 
   attempt     TestAttempt @relation(fields: [attemptId], references: [id])
-
+  createdAt   DateTime @default(now())
 }
 
