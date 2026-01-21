@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function useProctoring({
-  enabled,
+  enabled = true,
   maxViolations = 3,
   graceSeconds = 30,
   autoSubmitOnGraceExpire = false,
@@ -16,17 +16,38 @@ export default function useProctoring({
 
   /* ---------------- REFS ---------------- */
 
-  // Prevent duplicate violations during same grace window
+  // Prevent duplicate violations during one grace window
   const violationLocked = useRef(false);
 
-  // Has fullscreen ever been entered successfully?
+  // Fullscreen lifecycle tracking
   const hasEnteredFullscreen = useRef(false);
-
-  // Was fullscreen active before the last event?
   const wasFullscreen = useRef(false);
-
-  // Used to ignore fullscreen exits triggered by our own actions
   const intentionalExit = useRef(false);
+
+  // ✅ FIX: real grace window tracking (NO race conditions)
+  const graceStartedAtRef = useRef(null);
+
+  /* ---------------- HELPER ---------------- */
+
+  const triggerViolation = (type) => {
+    if (violationLocked.current) return;
+
+    const nextCount = violations + 1;
+    setViolations(nextCount);
+
+    // Check threshold immediately
+    if (nextCount >= maxViolations) {
+      onAutoSubmit?.();
+      return; // Don't show modal if we are submitting
+    }
+
+    violationLocked.current = true;
+    graceStartedAtRef.current = Date.now();
+    setGraceTime(graceSeconds);
+    setShowViolationModal(true);
+
+    onViolation?.({ type, count: nextCount, timestamp: new Date().toISOString() });
+  };
 
   /* ---------------- ENTER FULLSCREEN ---------------- */
 
@@ -35,7 +56,7 @@ export default function useProctoring({
     if (showViolationModal || violationLocked.current) return;
     if (document.fullscreenElement) return;
 
-    document.documentElement.requestFullscreen().catch(() => {});
+    document.documentElement.requestFullscreen().catch(() => { });
   }, [enabled, showViolationModal]);
 
   /* ---------------- FULLSCREEN CHANGE ---------------- */
@@ -45,34 +66,20 @@ export default function useProctoring({
 
     const isFullscreenNow = !!document.fullscreenElement;
 
-    // First successful fullscreen entry → mark & ignore
+    // First valid fullscreen entry
     if (!hasEnteredFullscreen.current && isFullscreenNow) {
       hasEnteredFullscreen.current = true;
       wasFullscreen.current = true;
       return;
     }
 
-    // REAL fullscreen exit → violation
+    // Real fullscreen exit → violation
     if (
       wasFullscreen.current &&
       !isFullscreenNow &&
       !intentionalExit.current
     ) {
-      if (violationLocked.current) return;
-
-      violationLocked.current = true;
-
-      const next = violations + 1;
-      setViolations(next);
-
-      onViolation?.({
-        type: "FULLSCREEN_EXIT",
-        count: next,
-        timestamp: new Date().toISOString(),
-      });
-
-      setShowViolationModal(true);
-      setGraceTime(graceSeconds);
+      triggerViolation("FULLSCREEN_EXIT");
     }
 
     wasFullscreen.current = isFullscreenNow;
@@ -83,7 +90,7 @@ export default function useProctoring({
     return () => {
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [violations, enabled, showViolationModal]);
+  }, [enabled, violations]);
 
   /* ---------------- TAB SWITCH ---------------- */
 
@@ -96,21 +103,7 @@ export default function useProctoring({
         hasEnteredFullscreen.current &&
         !showViolationModal
       ) {
-        if (violationLocked.current) return;
-
-        violationLocked.current = true;
-
-        const next = violations + 1;
-        setViolations(next);
-
-        onViolation?.({
-          type: "TAB_SWITCH",
-          count: next,
-          timestamp: new Date().toISOString(),
-        });
-
-        setShowViolationModal(true);
-        setGraceTime(graceSeconds);
+        triggerViolation("TAB_SWITCH");
       }
     };
 
@@ -118,28 +111,13 @@ export default function useProctoring({
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [violations, enabled, showViolationModal]);
+  }, [enabled, showViolationModal, violations]);
 
-  /* ---------------- WINDOW MINIMIZE / APP SWITCH ---------------- */
+  /* ---------------- WINDOW MINIMIZE ---------------- */
 
   const handleWindowBlur = () => {
     if (!hasEnteredFullscreen.current || showViolationModal) return;
-
-    if (violationLocked.current) return;
-
-    violationLocked.current = true;
-
-    const next = violations + 1;
-    setViolations(next);
-
-    onViolation?.({
-      type: "WINDOW_MINIMIZE",
-      count: next,
-      timestamp: new Date().toISOString(),
-    });
-
-    setShowViolationModal(true);
-    setGraceTime(graceSeconds);
+    triggerViolation("WINDOW_MINIMIZE");
   };
 
   useEffect(() => {
@@ -147,42 +125,63 @@ export default function useProctoring({
     return () => {
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [violations, showViolationModal]);
+  }, [showViolationModal, violations]);
 
-  /* ---------------- GRACE TIMER ---------------- */
+  /* ---------------- GRACE TIMER (FIXED) ---------------- */
 
   useEffect(() => {
     if (!showViolationModal) return;
-
-    if (graceTime <= 0) {
-      setShowViolationModal(false);
-
-      // Unlock future violations
-      violationLocked.current = false;
-
-      if (autoSubmitOnGraceExpire) {
-        onAutoSubmit?.();
-      }
-
-      return;
-    }
+    if (!graceStartedAtRef.current) return;
 
     const timer = setInterval(() => {
-      setGraceTime((t) => t - 1);
+      const elapsed = Math.floor(
+        (Date.now() - graceStartedAtRef.current) / 1000
+      );
+      const remaining = graceSeconds - elapsed;
+
+      if (remaining <= 0) {
+        setShowViolationModal(false);
+        violationLocked.current = false;
+        graceStartedAtRef.current = null;
+
+        // ❗ Grace expired & user did NOT comply
+        if (autoSubmitOnGraceExpire && !document.fullscreenElement) {
+          onAutoSubmit?.();
+        }
+
+        clearInterval(timer);
+        return;
+      }
+
+      setGraceTime(remaining);
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [showViolationModal, graceTime, autoSubmitOnGraceExpire]);
+  }, [showViolationModal, autoSubmitOnGraceExpire]);
 
   /* ---------------- RE-ENTER FULLSCREEN ---------------- */
 
-  const reEnterFullscreen = () => {
-    intentionalExit.current = true;
+  /* ---------------- RE-ENTER FULLSCREEN ---------------- */
 
-    document.documentElement.requestFullscreen().then(() => {
+  const reEnterFullscreen = async () => {
+    try {
+      // 1. Tell the listener this is a known change
+      intentionalExit.current = true;
+
+      // 2. Request Fullscreen (Must happen before state changes for browser permission)
+      await document.documentElement.requestFullscreen();
+
+      // 3. Reset all locks so a SECOND violation can happen immediately if they exit again
       setShowViolationModal(false);
+      violationLocked.current = false; // <--- CRITICAL FIX
+      graceStartedAtRef.current = null;
       intentionalExit.current = false;
-    });
+
+    } catch (err) {
+      console.error("Fullscreen restoration failed:", err);
+      // If it fails, keep the modal open so they try again
+      intentionalExit.current = false;
+    }
   };
 
   /* ---------------- PUBLIC API ---------------- */
