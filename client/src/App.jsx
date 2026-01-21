@@ -4,6 +4,7 @@ import PublicTest from "./pages/PublicTest";
 import StartTest from "./pages/StartTest";
 import TestPage from "./pages/TestPage";
 import Result from "./pages/Result";
+import AdminLogin from "./pages/AdminLogin";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/start" element={<StartTest />} />
         <Route path="/test-run" element={<TestPage />} />
         <Route path="/result" element={<Result />} />
+        <Route path="/admin/login" element={<AdminLogin />} />
 
 
       </Routes>
