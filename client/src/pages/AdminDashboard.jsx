@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { authHeader } from "../api/authHeader";
+import AdminHeader from "../components/AdminHeader";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState({
@@ -31,6 +32,7 @@ export default function AdminDashboard() {
 
   return (
     <div style={styles.page}>
+      <AdminHeader />
       <h1>Admin Dashboard</h1>
 
       {/* -------- STATS CARDS -------- */}
