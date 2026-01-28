@@ -87,7 +87,7 @@ function Card({ title, value }) {
 
 const styles = {
   page: {
-    padding: "24px",
+    padding: "2px 24px",
     background: "#f8fafc",
     minHeight: "100vh",
   },
