@@ -11,6 +11,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 
 import AdminGuard from "./components/AdminGuard";
 import AdminLayout from "./components/AdminLayout";
+import AdminViolations from "./pages/AdminViolations";
 
 export default function App() {
   return (
@@ -39,6 +40,8 @@ export default function App() {
           <Route path="tests" element={<div>Tests Page</div>} />
           <Route path="attempts" element={<div>Attempts Page</div>} />
           <Route path="violations" element={<div>Violations Page</div>} />
+          <Route path="violations" element={<AdminViolations />} />
+
         </Route>
       </Routes>
     </BrowserRouter>
